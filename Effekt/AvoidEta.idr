@@ -1,8 +1,8 @@
 module Effekt.AvoidEta
 
 import Effekt.CpsUnstaged
-import Effekt.CpsStaged
-import Effekt.IteratedUnstaged
+import public Effekt.CpsStaged
+import public Effekt.IteratedUnstaged
 
 mutual
   public export
@@ -10,23 +10,32 @@ mutual
     Static :   (Exp a -> STM rs b)   -> CTX rs a b
     Dynamic :  Exp (a -> Stm rs b)   -> CTX rs a b
 
+  -- data type to help with type inference
+  -- bonus: can carry list of types around at runtime a bit less often
   public export
-  STM : List Type -> Type -> Type
-  STM [] a = Exp a
-  STM (r :: rs) a = CTX rs a r -> STM rs r
+  data STM : List Type -> Type -> Type where
+    Pure : Exp a -> STM [] a
+    Iter : (CTX rs a r -> STM rs r) -> STM (r :: rs) a
+
+unIter : STM (r :: rs) a -> CTX rs a r -> STM rs r
+unIter (Iter m) = m
+
+export
+runPure : STM [] a -> Exp a
+runPure (Pure x) = x
 
 mutual
   export
   reify : STM rs a -> Exp (Stm rs a)
-  reify {rs = []} m = m
-  reify {rs = (q :: qs)} m =
+  reify (Pure m) = m
+  reify (Iter m) =
     (Lam $ \ k =>  reify (m (Dynamic k)))
 
   export
-  reflect : Exp (Stm rs a) -> STM rs a
-  reflect {rs = []} m = m
-  reflect {rs = (q :: qs)} m =
-    \k => reflect (App (m)  ((reifyContext k)))
+  reflect : {rs : _} -> Exp (Stm rs a) -> STM rs a
+  reflect {rs = []} m = Pure m
+  reflect {rs = _ :: _} m =
+    Iter $ \k => reflect (App (m)  ((reifyContext k)))
 
   export
   reifyContext : CTX rs a r -> Exp (a -> Stm rs r)
@@ -34,50 +43,54 @@ mutual
   reifyContext (Dynamic k) = k
 
 export
-resume : CTX rs a r -> (Exp a -> STM rs r)
+resume : {rs : _} -> CTX rs a r -> (Exp a -> STM rs r)
 resume (Static k) = k
 resume (Dynamic k) = \a => reflect (App (k)  (a))
 
 export
-pure : Exp a -> STM rs a
-pure{  rs= []}         a = a
-pure{  rs= r :: rs}  a = \k => resume k a
+pure : {rs : _} -> Exp a -> STM rs a
+pure{  rs= []}         a = Pure a
+pure{  rs= r :: rs}  a = Iter $ \k => resume k a
 
-push : CTX (r :: rs) a b -> CTX rs b r -> CTX rs a r
-push f k = Static (\a => resume f a k)
+push : {r : _} -> {rs : _} -> CTX (r :: rs) a b -> CTX rs b r -> CTX rs a r
+push f k = Static (\a => unIter (resume f a) k)
 
-bind : STM rs a -> CTX rs a b -> STM rs b
-bind{  rs= []}         m f = resume f m
-bind{  rs= r :: rs}  m f = \k => m (push f k)
+bind : {rs : _} -> STM rs a -> CTX rs a b -> STM rs b
+bind (Pure m) f = resume f m
+bind (Iter m) f = Iter $ \k => m (push f k)
 
 export
 shift0 : (CTX rs a r -> STM rs r) -> STM (r :: rs) a
-shift0 = id
+shift0 = Iter
 
 export
 runIn0 : STM (r :: rs) a -> CTX rs a r -> STM rs r
-runIn0 = id
+runIn0 = unIter
 
 export
-reset0 : STM (a :: rs) a -> STM rs a
-reset0 m = runIn0 m (Static pure)
+reset0 : {rs : _} -> STM (a :: rs) a -> STM rs a
+reset0 m = runIn0 m (Static AvoidEta.pure)
 
 export
-lift : STM rs a -> STM (r :: rs) a
-lift = bind
+lift : {rs : _} -> STM rs a -> STM (r :: rs) a
+lift = Iter . bind
 
 export
-(>>=) : STM rs a -> (Exp a -> STM rs b) -> STM rs b
+(>>=) : {rs : _} -> STM rs a -> (Exp a -> STM rs b) -> STM rs b
 m >>= f = bind m (Static f)
 
-add : STM rs Int -> STM rs Int -> STM rs Int
-add mx my = do
+export
+(>>) : {rs : _} -> STM rs a -> STM rs b -> STM rs b
+m >> n = bind m (Static (const n))
+
+add : {rs : _} -> STM rs Int -> STM rs Int -> STM rs Int
+add mx my = AvoidEta.do
   x <- mx
   y <- my
   pure ((Add x y))
 
-display : Exp String -> STM (IO () :: rs) ()
-display {rs} s = shift0 (\c => do
+display : {rs : _} -> Exp String -> STM (IO () :: rs) ()
+display {rs} s = shift0 (\c => AvoidEta.do
   a <- resume c Uni
   pure {rs} ((Seq ((Dis s)) a)))
 
@@ -92,20 +105,19 @@ export
 ifthenelse : Exp Bool -> STM rs a -> STM rs a -> STM rs a
 ifthenelse {rs} Tru t _ = t
 ifthenelse {rs} Fls _ e = e
-ifthenelse {rs=[]} b t e = Ite b t e
-ifthenelse {rs=q::qs} b t e = \k => ifthenelse b (t k) (e k)
+ifthenelse b (Pure t) (Pure e) = Pure $ Ite b t e
+ifthenelse b (Iter t) (Iter e) = Iter $ \k => ifthenelse b (t k) (e k)
 
 export
-letrec : ((Exp a -> STM rs b) -> Exp a -> STM rs b) -> Exp a -> STM rs b
+letrec : {rs : _} -> ((Exp a -> STM rs b) -> Exp a -> STM rs b) -> Exp a -> STM rs b
 letrec body a = reflect (App (Rec (\f => \x =>
   reify (body (\y => reflect (App (f)  (y))) x)))  (a))
 
 -- Iteration happens to be recursion.
 export
-loop : (Exp a -> STM (r :: rs) a) -> Exp a -> STM rs r
-loop m = letrec (\k => \a => m a (Static k))
+loop : {rs : _} -> (Exp a -> STM (r :: rs) a) -> Exp a -> STM rs r
+loop m = letrec (\k => \a => unIter (m a) (Static k))
 
 export
-break : Exp r -> STM (r :: rs) a
-break r = shift0 (\_ => pure r)
-
+break : {rs : _} -> Exp r -> STM (r :: rs) a
+break r = shift0 (\_ => AvoidEta.pure r)

@@ -1,53 +1,50 @@
 module Main
 
-import Effekt.CpsStaged
-import Effekt.IteratedUnstaged
-import Effekt.IteratedStaged
 import Effekt.AvoidEta
 
-fail : STM (String :: rs) a
-fail = shift0 (\k => do
+fail : {rs : _} -> STM (String :: rs) a
+fail = shift0 (\k => AvoidEta.do
   pure (Str "no"))
 
-flip : STM (r :: rs) Bool
-flip = shift0 (\k => do
+flip : {r : _} -> {rs : _} -> STM (r :: rs) Bool
+flip = shift0 (\k => AvoidEta.do
   resume k Tru
   resume k Fls)
 
-delimitFail : STM rs String
-delimitFail {rs} = do
+delimitFail : {rs : _} -> STM rs String
+delimitFail {rs} = AvoidEta.do
   a <- reset0 fail
   pure {rs} ((Cat (Str "Answer was: ") a))
 
-emit : Exp a -> STM (List a :: rs) ()
-emit a = shift0 (\k => do
+emit : {rs : _} -> Exp a -> STM (List a :: rs) ()
+emit a = shift0 (\k => AvoidEta.do
   as <- resume k Uni
   pure ((Con a as)))
 
-collect : STM (List a :: rs) b -> STM rs (List a)
+collect : {a : _} -> {rs : _} -> STM (List a :: rs) b -> STM rs (List a)
 collect {rs} {a} m = reset0 {a=List a} {rs} (
   (>>=) {rs=List a :: rs} m (\u => pure {rs=List a :: rs} Emp))
 
-choice : Exp Int -> STM (String :: rs) Int
-choice {rs} = letrec (\recurse => \n => do
-  ifthenelse ((Sma n (Lit 1)))
+choice : {rs : _} -> Exp Int -> STM (String :: rs) Int
+choice {rs} = letrec {rs = String :: rs} (\recurse => \n => AvoidEta.do
+  AvoidEta.ifthenelse {a = Int} ((Sma n (Lit 1)))
     fail
-    (do
-      b <- flip
+    (AvoidEta.do
+      b <- Main.flip
       ifthenelse b
         (pure {rs=String::rs} n)
         (recurse ((Sub n (Lit 1))))))
 
-triple : Exp Int -> Exp Int -> STM (String :: rs) (Int, Int, Int)
-triple {rs} n s = do
-  i  <- choice n
-  j  <- choice ((Sub i (Lit 1)))
-  k  <- choice ((Sub j (Lit 1)))
+triple : {rs : _} -> Exp Int -> Exp Int -> STM (String :: rs) (Int, Int, Int)
+triple {rs} n s = AvoidEta.do
+  i  <- Main.choice {rs} n
+  j  <- Main.choice {rs} ((Sub i (Lit 1)))
+  k  <- Main.choice {rs} ((Sub j (Lit 1)))
   ifthenelse ((Equ ((Add i ((Add j k)))) s))
     (pure {rs=String::rs} (Tri i j k))
     fail
 
-emitTriples : STM (String :: List (Int, Int, Int) :: rs) String
+emitTriples : {rs : _} -> STM (String :: List (Int, Int, Int) :: rs) String
 emitTriples {rs} =
   (>>=) {rs=(String :: List (Int, Int, Int) :: rs)} (triple (Lit 9) (Lit 15))  (\ijk =>
   (>>=) {rs=(String :: List (Int, Int, Int) :: rs)} (lift (emit ijk)) (\u =>
@@ -56,11 +53,11 @@ emitTriples {rs} =
 emittedTriples : STM [] (List (Int, Int, Int))
 emittedTriples = collect {rs=[]} (reset0 (emitTriples {rs=[]}))
 
-first : Exp a -> STM (Maybe a :: rs) ()
+first : {rs : _} -> Exp a -> STM (Maybe a :: rs) ()
 first {rs} a = shift0 (\k => do
   pure {rs} ((Jus a)))
 
-firstTriples : STM (String :: Maybe (Int, Int, Int) :: rs) String
+firstTriples : {rs : _} -> STM (String :: Maybe (Int, Int, Int) :: rs) String
 firstTriples {rs} =
   (>>=) {rs=(String :: Maybe (Int, Int, Int) :: rs)} (triple (Lit 9) (Lit 15))  (\ijk =>
   (>>=) {rs=(String :: Maybe (Int, Int, Int) :: rs)} (lift (first ijk)) (\u =>
@@ -72,11 +69,11 @@ firstTriple = reset0 {a=Maybe (Int,Int,Int)} {rs=[]} (
 
 program : Exp (Stm [String,List Int] String -> Stm [] (List Int))
 program = Lam (\m =>
-  reify (collect {rs=[]} {a=Int} {b=String} (reset0 {rs=[List Int]} (
+  reify {rs = []} (collect {rs=[]} {a=Int} {b=String} (reset0 {rs=[List Int]} (
     reflect {a=String} {rs=[String,List Int]} m))))
 
 main : IO ()
-main = putStrLn (pretty 0 emittedTriples)
+main = putStrLn (pretty 0 $ runPure emittedTriples)
 
   -- generated_source : List (Int, Int, Int)
   -- generated_source =

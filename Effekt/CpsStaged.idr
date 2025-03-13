@@ -1,6 +1,6 @@
 module Effekt.CpsStaged
 
-import Effekt.CpsUnstaged
+import public Effekt.CpsUnstaged
 
 public export
 data Exp : Type -> Type where

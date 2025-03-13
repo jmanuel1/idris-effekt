@@ -7,8 +7,7 @@ Idris code accompanying the TyDe '18 paper ["Typing, Representing, and Abstracti
 Compile with:
 
 ```
-idris Main.idr -o main
+idris2 Main.idr -o main
 ```
 
-Tested against Idris version 1.3.0.
-
+Tested against Idris 2 version 0.7.0-7ca34d1db.
