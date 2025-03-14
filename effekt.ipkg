@@ -1,0 +1,14 @@
+package effekt
+
+depends = indexed
+
+main = Main
+
+modules =
+  Effekt.AvoidEta,
+  Effekt.CpsATM,
+  Effekt.CpsStaged,
+  Effekt.CpsUnstaged,
+  Effekt.IteratedStaged,
+  Effekt.IteratedUnstaged,
+  Main
