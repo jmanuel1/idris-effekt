@@ -2,6 +2,10 @@
 
 Idris code accompanying the TyDe '18 paper ["Typing, Representing, and Abstracting Control"](https://dl.acm.org/doi/10.1145/3240719.3241788).
 
+## Additions
+
+- CPS monad with answer-type modification in `Effekt.CpsATM`
+
 ## Installation
 
 Compile with:
